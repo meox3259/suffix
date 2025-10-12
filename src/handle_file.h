@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <vector>
 
 #define MAX_READ_LEN 1000000000
 #define MAX_ID_LEN 1000

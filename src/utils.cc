@@ -7,8 +7,6 @@
 #include <cstring>
 #include <sys/types.h>
 
-#include "logger.h"
-
 #define overlap_threshold 0.5
 
 enum class GENE { A, C, G, T };
@@ -93,4 +91,8 @@ bool check_substring(const char* text, const std::string& substring) {
         return false;
     }
     return strstr(text, substring.c_str()) != nullptr;
+}
+
+int overlap_segment(int l1, int r1, int l2, int r2) {
+  return std::max(0, std::min(r1, r2) - std::max(l1, l2) + 1);
 }

@@ -1,10 +1,8 @@
 #pragma once
 
-#include <memory>
-#include <string>
-#include <vector>
+#include <fstream>
 
-#include "utils.h"
+#include "handle_file.h"
+#include "options.h"
 
-bool calculate_sparsity(const std::vector<int> &index);
-void solve(std::ofstream &ofs, uint8_t *s, int len, int *is_N, const Param &param);
+void solve(std::ofstream &ofs, Read *Read, const Options &options);
