@@ -8,6 +8,7 @@
 #include "radix_sort.h"
 #include "spoa/include/spoa/spoa.hpp"
 #include "suffix_array.h"
+#include "thread_pool.h"
 #include "utils.h"
 
 #include <algorithm>
@@ -488,10 +489,9 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   // 找到当前gap对应的bucket，假设上次区间分割点为[s, e]， 下次查找两个匹配的k-mer (s1, e1)，其中(s < s1 < e < e1)，且s1离s和e1离e都尽量近
   // 再做alignment，向右延伸
 
-  auto alignment_engine = spoa::AlignmentEngine::Create(
-      spoa::AlignmentType::kNW, 3, -5, -3); // linear gaps
-  spoa::Graph graph{};
-
+  ThreadPool pool(options.num_threads);
+  std::vector<std::future<void>> results;
+  std::mutex macrosatellites_mutex;
   for (const auto &[start_position, unit_size, index] :
        raw_estimate_unit_region) {
     int end_position = start_position + unit_size;
@@ -591,7 +591,6 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
     }
 
     int anchor_size = static_cast<int>(anchors.size());
-
     std::vector<std::string> sequences;
     // 1804 5099 8429 11753 15077 18408 21777 25101 28432
     for (int i = 0; i < anchor_size - 1; ++i) {
@@ -602,72 +601,90 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
       sequences.push_back(cur_seq);
     }
 
-    for (auto &sequence : sequences) {
-      auto alignment = alignment_engine->Align(sequence, graph);
-      graph.AddAlignment(alignment, sequence);
-    }
+    ft.updateMax(
+        std::min(raw_left_boundary + 1, Read->len - 1),
+        std::min(raw_right_boundary + approximate_repeat_unit / 2, Read->len));
 
-    auto consensus = graph.GenerateConsensus();
-    int consensus_len = static_cast<int>(consensus.size());
-    uint8_t *cons = alloc_uint8_t(consensus);
+    results.emplace_back(pool.enqueue([&, sequences, anchors, raw_left_boundary,
+                                       raw_right_boundary]() mutable {
+      auto alignment_engine = spoa::AlignmentEngine::Create(
+          spoa::AlignmentType::kNW, 3, -5, -3); // linear gaps
+      spoa::Graph graph{};
 
-    int l0 = std::max(0, raw_left_boundary - consensus_len + 1);
-    int r0 = raw_left_boundary;
-    int len0 = r0 - l0 + 1;
+      for (auto &sequence : sequences) {
+        auto alignment = alignment_engine->Align(sequence, graph);
+        graph.AddAlignment(alignment, sequence);
+      }
 
-    uint8_t *sequence_middle =
-        const_cast<uint8_t *>(reinterpret_cast<const uint8_t *>(
-            sequences[sequences.size() / 2].c_str()));
-    int sequence_middle_len =
-        static_cast<int>(sequences[sequences.size() / 2].size());
+      auto consensus = graph.GenerateConsensus();
+      int consensus_len = static_cast<int>(consensus.size());
+      uint8_t *cons = alloc_uint8_t(consensus);
 
-    int move_left_boundary_len = alignment::extend_left_boundary(
-        sequence_middle, sequence_middle_len,
-        reinterpret_cast<uint8_t *>(query) + l0, len0, 1. - options.error_rate);
+      int l0 = std::max(0, raw_left_boundary - consensus_len + 1);
+      int r0 = raw_left_boundary;
+      int len0 = r0 - l0 + 1;
 
-    int l1 = raw_right_boundary;
-    int r1 = std::min(Read->len, raw_right_boundary + consensus_len - 1);
-    int len1 = r1 - l1 + 1;
+      uint8_t *sequence_middle =
+          const_cast<uint8_t *>(reinterpret_cast<const uint8_t *>(
+              sequences[sequences.size() / 2].c_str()));
+      int sequence_middle_len =
+          static_cast<int>(sequences[sequences.size() / 2].size());
 
-    int move_right_boundary_len = alignment::extend_right_boundary(
-        sequence_middle, sequence_middle_len,
-        reinterpret_cast<uint8_t *>(query) + l1, len1, 1. - options.error_rate);
+      int move_left_boundary_len = alignment::extend_left_boundary(
+          sequence_middle, sequence_middle_len,
+          reinterpret_cast<uint8_t *>(query) + l0, len0,
+          1. - options.error_rate);
 
-    raw_left_boundary -= move_left_boundary_len + 1;
-    raw_right_boundary += move_right_boundary_len + 1;
-    anchors.push_back(raw_left_boundary);
-    anchors.push_back(raw_right_boundary);
-    sort(anchors.begin(), anchors.end());
-    anchors.erase(unique(anchors.begin(), anchors.end()), anchors.end());
+      int l1 = raw_right_boundary;
+      int r1 = std::min(Read->len, raw_right_boundary + consensus_len - 1);
+      int len1 = r1 - l1 + 1;
 
-    Macrosatellite macrosatellite;
-    macrosatellite.left_boundary = raw_left_boundary;
-    macrosatellite.right_boundary = raw_right_boundary;
-    macrosatellite.repeat_length = raw_right_boundary - raw_left_boundary + 1;
-    macrosatellite.copy_number =
-        static_cast<double>(raw_right_boundary - raw_left_boundary + 1) /
-        static_cast<double>(consensus_len);
-    macrosatellite.approximate_repeat_unit = consensus_len;
-    macrosatellite.consensus = std::move(consensus);
-    macrosatellite.anchors = std::move(anchors);
+      int move_right_boundary_len = alignment::extend_right_boundary(
+          sequence_middle, sequence_middle_len,
+          reinterpret_cast<uint8_t *>(query) + l1, len1,
+          1. - options.error_rate);
 
-    double total_match = 0.;
-    double total_length = 0.;
+      raw_left_boundary -= move_left_boundary_len + 1;
+      raw_right_boundary += move_right_boundary_len + 1;
+      anchors.push_back(raw_left_boundary);
+      anchors.push_back(raw_right_boundary);
+      sort(anchors.begin(), anchors.end());
+      anchors.erase(unique(anchors.begin(), anchors.end()), anchors.end());
 
-    for (auto &sequence : sequences) {
-      const uint8_t *seq = reinterpret_cast<const uint8_t *>(sequence.c_str());
-      int seq_len = static_cast<int>(sequence.size());
-      auto [match, total] =
-          alignment::alignment(sequence_middle, sequence_middle_len,
-                               const_cast<uint8_t *>(seq), seq_len);
-      total_match += match;
-      total_length += sequence.size();
-    }
-    macrosatellite.avg_match_ratio = total_match / total_length;
-    macrosatellites.emplace_back(macrosatellite);
+      Macrosatellite macrosatellite;
+      macrosatellite.left_boundary = raw_left_boundary;
+      macrosatellite.right_boundary = raw_right_boundary;
+      macrosatellite.repeat_length = raw_right_boundary - raw_left_boundary + 1;
+      macrosatellite.copy_number =
+          static_cast<double>(raw_right_boundary - raw_left_boundary + 1) /
+          static_cast<double>(consensus_len);
+      macrosatellite.approximate_repeat_unit = consensus_len;
+      macrosatellite.consensus = std::move(consensus);
+      macrosatellite.anchors = std::move(anchors);
 
-    ft.updateMax(std::min(raw_left_boundary + 1, Read->len - 1),
-                 std::min(raw_right_boundary + consensus_len / 2, Read->len));
+      double total_match = 0.;
+      double total_length = 0.;
+
+      for (auto &sequence : sequences) {
+        const uint8_t *seq =
+            reinterpret_cast<const uint8_t *>(sequence.c_str());
+        int seq_len = static_cast<int>(sequence.size());
+        auto [match, total] =
+            alignment::alignment(sequence_middle, sequence_middle_len,
+                                 const_cast<uint8_t *>(seq), seq_len);
+        total_match += match;
+        total_length += sequence.size();
+      }
+      macrosatellite.avg_match_ratio = total_match / total_length;
+      {
+        std::lock_guard<std::mutex> lock(macrosatellites_mutex);
+        macrosatellites.emplace_back(macrosatellite);
+      }
+    }));
+  }
+
+  for (auto &result : results) {
+    result.get();
   }
 
   LOG << "cnt = " << cnt;

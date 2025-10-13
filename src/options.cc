@@ -30,31 +30,25 @@ int intFromText(const char *text) {
   return x;
 }
 
-Options::Options() :
-  error_rate(0.05),
-  verbose(false),
-  input_filename(nullptr),
-  output_filename(nullptr),
-  kmer_size(30),
-  N_threshold(0.5),
-  min_anchor_size(3),
-  max_anchor_size(20),
-  expand_window_size(10),
-  min_copy_number(5),
-  max_copy_number(1000),
-  outputType(maskOut) {}
+Options::Options()
+    : error_rate(0.05), verbose(false), input_filename(nullptr),
+      output_filename(nullptr), kmer_size(30), N_threshold(0.5),
+      min_anchor_size(3), max_anchor_size(20), expand_window_size(10),
+      min_copy_number(5), max_copy_number(1000), num_threads(4),
+      outputType(maskOut) {}
 
 void Options::fromArgs(int argc, char **argv) {
   std::string help = "currently nothing";
   // -k for transition cost?
 
-  const char sOpts[] = "vi:o:k:e:hn:";
+  const char sOpts[] = "vi:o:k:e:hn:t:";
 
   static struct option lOpts[] = {{"help", no_argument, 0, 'h'},
                                   {"verbose", no_argument, 0, 'v'},
                                   {"kmer", required_argument, 0, 'k'},
                                   {"error", required_argument, 0, 'e'},
                                   {"nth", required_argument, 0, 'n'},
+                                  {"num_threads", required_argument, 0, 't'},
                                   {0, 0, 0, 0}};
 
   int c;
@@ -77,6 +71,9 @@ void Options::fromArgs(int argc, char **argv) {
       break;
     case 'n':
       N_threshold = intFromText(optarg);
+      break;
+    case 't':
+      num_threads = intFromText(optarg);
       break;
     }
   }

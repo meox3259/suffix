@@ -18,6 +18,7 @@ struct Options {
   int min_copy_number;
   int max_copy_number;
   int expand_window_size;
-  
+  int num_threads;
+
   enum OutputType { maskOut, probOut, countOut, bedOut, repOut } outputType;
 };
