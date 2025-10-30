@@ -120,53 +120,6 @@ std::pair<int, int> alignment(const std::string &query_string,
   return {xid[0], accumulate(xid.begin(), xid.end(), 0)};
 }
 
-int ksw2_backtrack_left_end(int n_cigar, uint32_t *cigar, uint8_t *query,
-                            int qlen, uint8_t *target, int tlen, double ratio) {
-  int qi, ti;
-  qi = qlen - 1;
-  ti = tlen - 1;
-  std::vector<std::pair<int, int>> match;
-  match.reserve(std::max(qlen, tlen));
-  for (int i = n_cigar - 1; i >= 0; --i) {
-    int op = cigar[i] & 0xf;
-    int len = cigar[i] >> 4;
-    if (op == 0) {
-      // match/mismatch
-      for (int j = 0; j < len; ++j) {
-        if (query[qi - j] == target[ti - j]) {
-          match.push_back({1, 1});
-        } else {
-          match.push_back({1, 0});
-        }
-      }
-      qi -= len;
-      ti -= len;
-    } else if (op == 1) {
-      match.push_back({len, 0});
-      qi -= len;
-    } else if (op == 2) {
-      match.push_back({len, 0});
-      ti -= len;
-    } else {
-      return -1;
-    }
-  }
-
-  double prefix_match_sum = 0;
-  double prefix_total_sum = 0;
-  int last_pos = -1;
-  for (int i = 0; i < match.size(); ++i) {
-    prefix_total_sum += match[i].first;
-    prefix_match_sum += match[i].second;
-    double curr_match_ratio = prefix_match_sum / prefix_total_sum;
-    if (curr_match_ratio >= ratio) {
-      last_pos = i;
-    }
-  }
-
-  return last_pos;
-}
-
 int ksw2_backtrack_right_end(int n_cigar, uint32_t *cigar, uint8_t *query,
                              int qlen, uint8_t *target, int tlen,
                              double ratio) {
@@ -214,16 +167,83 @@ int ksw2_backtrack_right_end(int n_cigar, uint32_t *cigar, uint8_t *query,
   return last_pos;
 }
 
+int ksw2_backtrack_left_end(int n_cigar, uint32_t *cigar, uint8_t *query,
+                            int qlen, uint8_t *target, int tlen, double ratio) {
+  int qi, ti;
+  qi = ti = 0;
+  std::vector<std::pair<int, int>> match;
+  match.reserve(std::max(qlen, tlen));
+  for (int i = 0; i < n_cigar; ++i) {
+    int op = cigar[i] & 0xf;
+    int len = cigar[i] >> 4;
+    if (op == 0) {
+      // match/mismatch
+      for (int j = 0; j < len; ++j) {
+        if (query[qi + j] == target[ti + j]) {
+          match.push_back({1, 1});
+        } else {
+          match.push_back({1, 0});
+        }
+      }
+      qi += len;
+      ti += len;
+    } else if (op == 1) {
+      match.push_back({len, 0});
+      qi += len;
+    } else if (op == 2) {
+      match.push_back({len, 0});
+      ti += len;
+    } else {
+      return -1;
+    }
+  }
+
+  double prefix_match_sum = 0;
+  double prefix_total_sum = 0;
+  int last_pos = -1;
+  for (int i = 0; i < match.size(); ++i) {
+    prefix_total_sum += match[i].first;
+    prefix_match_sum += match[i].second;
+    double curr_match_ratio = prefix_match_sum / prefix_total_sum;
+    if (curr_match_ratio >= ratio) {
+      last_pos = i;
+    }
+  }
+
+  return last_pos;
+}
+
 int extend_left_boundary(uint8_t *query, int qlen, uint8_t *target, int tlen,
                          double ratio) {
   ksw_extz_t ez;
-  memset(&ez, 0, sizeof(ksw_extz_t));
+  memset(&ez, 0, sizeof(ez));
   int w = -1, zdrop = -1, end_bonus = 0, flag = 0;
 
-  ksw_extz2_sse(0, qlen, query, tlen, target, 5, mat, gap_open, gap_ext, w,
-                zdrop, end_bonus, flag, &ez);
-  return ksw2_backtrack_left_end(ez.n_cigar, ez.cigar, query, qlen, target,
-                                 tlen, ratio);
+  // 堆上分配反转缓冲
+  uint8_t *rq = (uint8_t *)malloc((size_t)qlen);
+  uint8_t *rt = (uint8_t *)malloc((size_t)tlen);
+  if (!rq || !rt) {
+    free(rq);
+    free(rt);
+    return -1;
+  }
+
+  for (int i = 0, j = qlen - 1; i < qlen; ++i, --j)
+    rq[i] = query[j];
+  for (int i = 0, j = tlen - 1; i < tlen; ++i, --j)
+    rt[i] = target[j];
+
+  ksw_extz2_sse(0, qlen, rq, tlen, rt, 5, mat, gap_open, gap_ext, w, zdrop,
+                end_bonus, flag, &ez);
+  int ed =
+      ksw2_backtrack_left_end(ez.n_cigar, ez.cigar, rq, qlen, rt, tlen, ratio);
+
+  free(rq);
+  free(rt);
+  if (ez.cigar)
+    free(ez.cigar);
+
+  return ed;
 }
 
 int extend_right_boundary(uint8_t *query, int qlen, uint8_t *target, int tlen,
@@ -238,22 +258,26 @@ int extend_right_boundary(uint8_t *query, int qlen, uint8_t *target, int tlen,
                                   tlen, ratio);
 }
 
-int ksw2_global_with_cigar(const uint8_t *query, int qlen, const uint8_t *target, int tlen, int *n_cigar, uint32_t **cigar) {
-    ksw_extz_t ez; memset(&ez, 0, sizeof(ksw_extz_t));
-    int w = -1, zdrop = -1, end_bonus = 0, flag = 0;
-    ksw_extz2_sse(0, qlen, query, tlen, target, 5, mat, gap_open, gap_ext, w, zdrop, end_bonus, flag, &ez);
+int ksw2_global_with_cigar(const uint8_t *query, int qlen,
+                           const uint8_t *target, int tlen, int *n_cigar,
+                           uint32_t **cigar) {
+  ksw_extz_t ez;
+  memset(&ez, 0, sizeof(ksw_extz_t));
+  int w = -1, zdrop = -1, end_bonus = 0, flag = 0;
+  ksw_extz2_sse(0, qlen, query, tlen, target, 5, mat, gap_open, gap_ext, w,
+                zdrop, end_bonus, flag, &ez);
 #ifdef __DEBUG__
-    print_cigar(ez.n_cigar, ez.cigar);
+  print_cigar(ez.n_cigar, ez.cigar);
 #endif
-    vector<int> xid = ksw2_get_xid(ez.cigar, ez.n_cigar, query, target);
-    int iden_n = 0;
-    if (!xid.empty()) {
-        iden_n = xid[0];
-    }
-    *n_cigar = ez.n_cigar;
-    *cigar = ez.cigar;
-    // if (ez.cigar) free(ez.cigar);
-    return iden_n;
+  vector<int> xid = ksw2_get_xid(ez.cigar, ez.n_cigar, query, target);
+  int iden_n = 0;
+  if (!xid.empty()) {
+    iden_n = xid[0];
+  }
+  *n_cigar = ez.n_cigar;
+  *cigar = ez.cigar;
+  // if (ez.cigar) free(ez.cigar);
+  return iden_n;
 }
 
 } // namespace alignment
@@ -280,6 +304,8 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   for (int i = 0; i < Read->len; ++i) {
     prefix_sum_N[i + 1] = prefix_sum_N[i] + Read->is_N[i];
   }
+  //  std::cerr << "prefix_sum_N = " << prefix_sum_N[Read->len - 1] <<
+  //  std::endl;
   LOG << "prefix_sum_N_last = " << prefix_sum_N[Read->len - 1];
   // 构建 suspect region
 
@@ -348,7 +374,8 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
       // 这里非常慢
       assert(start_position <= end_position);
       int N_count = prefix_sum_N[end_position] - prefix_sum_N[start_position];
-      if (N_count > /*factor::N_threshold * (end_position - start_position + 1)*/ 100) {
+      if (N_count >
+          /*factor::N_threshold * (end_position - start_position + 1)*/ 100) {
         right_index.clear();
         start_position = Read->len - 1;
         end_position = 0;
@@ -356,7 +383,7 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
       }
       const auto &sorted_right_index = right_index_2d[id];
       for (int j = 0; j < sorted_right_index.size(); ++j) {
-        for (int k = 1; k <= 10 && j + k < sorted_right_index.size(); ++k) {
+        for (int k = 1; k <= 30 && j + k < sorted_right_index.size(); ++k) {
           int gap = sorted_right_index[j + k] - sorted_right_index[j];
           if (gap >= factor::lower_bound && gap <= factor::upper_bound) {
             gap_values.push_back(gap);
@@ -378,7 +405,8 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
     int start_position = *min_element(right_index.begin(), right_index.end());
     int end_position = *max_element(right_index.begin(), right_index.end());
     int N_count = prefix_sum_N[end_position + 1] - prefix_sum_N[start_position];
-    if (!(N_count > factor::N_threshold * (end_position - start_position + 1))) {
+    if (!(N_count >
+          factor::N_threshold * (end_position - start_position + 1))) {
       auto sorted_right_index = right_index_2d[id];
       assert(is_sorted(
           sorted_right_index.begin(), sorted_right_index.end(),
@@ -406,7 +434,8 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
       gaps, [](const auto &item) -> int { return item.second; }, Read->len);
   radix_sort(
       gap_values, [](const auto &item) -> int { return item; }, Read->len);
-  gap_values.erase(std::unique(gap_values.begin(), gap_values.end()), gap_values.end());
+  gap_values.erase(std::unique(gap_values.begin(), gap_values.end()),
+                   gap_values.end());
 
   std::vector<std::vector<pair<int, int>>> bucket_of_index(gap_values.size());
 
@@ -428,14 +457,19 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
     }
   }
 
-  LOG << "bucket_of_index.size() = "
-      << bucket_of_index.size();
+  LOG << "bucket_of_index.size() = " << bucket_of_index.size();
+  //  std::cerr << "bucket_of_index.size() = " << bucket_of_index.size()
+  //            << std::endl;
   // 校验一下
   for (auto &vec : bucket_of_index) {
-    assert(std::is_sorted(vec.begin(), vec.end(), [](const auto &a, const auto &b) -> bool { return a.first < b.first; }));
+    assert(std::is_sorted(vec.begin(), vec.end(),
+                          [](const auto &a, const auto &b) -> bool {
+                            return a.first < b.first;
+                          }));
   }
 
   LOG << "gap_values.size() = " << gap_values.size();
+  //  std::cerr << "gap_values.size() = " << gap_values.size() << std::endl;
   std::vector<std::tuple<int, int, int>> raw_estimate_unit_region;
 
   // 排好序后，计算原始的
@@ -469,12 +503,12 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   LOG << "radix_sort done";
 
   // 树状数组
-  MaxFenwickTree ft(Read->len);
+  OptimizedMaxFenwickTree ft(Read->len + 1);
 
   int seq_len = Read->len;
   auto already_covered = [&ft, &seq_len](int start_position, int end_position,
                                          int unit_size) {
-    int l_max = ft.queryPrefixMax(min(start_position + unit_size, seq_len));
+    int l_max = ft.queryPrefixMax(min(start_position, seq_len));
     return l_max >= end_position;
   };
 
@@ -486,8 +520,9 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   int cnt = 0;
   std::vector<Macrosatellite> macrosatellites;
   // 现在是按照unit_size排序
-  // 找到当前gap对应的bucket，假设上次区间分割点为[s, e]， 下次查找两个匹配的k-mer (s1, e1)，其中(s < s1 < e < e1)，且s1离s和e1离e都尽量近
-  // 再做alignment，向右延伸
+  // 找到当前gap对应的bucket，假设上次区间分割点为[s, e]，
+  // 下次查找两个匹配的k-mer (s1, e1)，其中(s < s1 < e <
+  // e1)，且s1离s和e1离e都尽量近 再做alignment，向右延伸
 
   ThreadPool pool(options.num_threads);
   std::vector<std::future<void>> results;
@@ -524,8 +559,7 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
 
       int ed = edlib_align_HW(query + l, qlen, query + l0, tlen, &s1, &e1,
                               std::min(qlen, tlen));
-
-      if (ed > min(qlen, tlen) * options.error_rate) {
+      if (ed > min(qlen, tlen) * options.error_rate * 2) {
         break;
       }
       anchors.push_back(e);
@@ -558,8 +592,7 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
 
       int ed = edlib_align_HW(query + l, qlen, query + l0, tlen, &s1, &e1,
                               std::min(qlen, tlen));
-
-      if (ed > min(qlen, tlen) * options.error_rate) {
+      if (ed > min(qlen, tlen) * options.error_rate * 2) {
         break;
       }
 
@@ -592,7 +625,7 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
 
     int anchor_size = static_cast<int>(anchors.size());
     std::vector<std::string> sequences;
-    // 1804 5099 8429 11753 15077 18408 21777 25101 28432
+    sequences.reserve(anchor_size);
     for (int i = 0; i < anchor_size - 1; ++i) {
       std::string cur_seq = "";
       for (int j = anchors[i]; j < anchors[i + 1]; ++j) {
@@ -601,11 +634,55 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
       sequences.push_back(cur_seq);
     }
 
+    int l0 = std::max(0, raw_left_boundary - unit_size + 1);
+    int r0 = raw_left_boundary;
+    int len0 = r0 - l0 + 1;
+
+    uint8_t *sequence_middle =
+        const_cast<uint8_t *>(reinterpret_cast<const uint8_t *>(
+            sequences[sequences.size() / 2].c_str()));
+    int sequence_middle_len =
+        static_cast<int>(sequences[sequences.size() / 2].size());
+
+    int move_left_boundary_len =
+        alignment::extend_left_boundary(sequence_middle, sequence_middle_len,
+                                        reinterpret_cast<uint8_t *>(query) + l0,
+                                        len0, 1. - options.error_rate * 2);
+
+    int l1 = raw_right_boundary;
+    int r1 = std::min(Read->len, raw_right_boundary + unit_size - 1);
+    int len1 = r1 - l1 + 1;
+
+    int move_right_boundary_len = alignment::extend_right_boundary(
+        sequence_middle, sequence_middle_len,
+        reinterpret_cast<uint8_t *>(query) + l1, len1,
+        1. - options.error_rate * 2);
+
+    raw_left_boundary -= move_left_boundary_len + 1;
+    raw_right_boundary += move_right_boundary_len + 1;
+    anchors.push_back(raw_left_boundary);
+    anchors.push_back(raw_right_boundary);
+    sort(anchors.begin(), anchors.end());
+    anchors.erase(unique(anchors.begin(), anchors.end()), anchors.end());
+
     ft.updateMax(
-        std::min(raw_left_boundary + 1, Read->len - 1),
+        std::max(raw_left_boundary + 1 - approximate_repeat_unit / 2, 1),
         std::min(raw_right_boundary + approximate_repeat_unit / 2, Read->len));
 
-    results.emplace_back(pool.enqueue([&, sequences, anchors, raw_left_boundary,
+    sequences.clear();
+    anchor_size = static_cast<int>(anchors.size());
+    for (int i = 0; i < anchor_size - 1; ++i) {
+      std::string cur_seq = "";
+      for (int j = anchors[i]; j < anchors[i + 1]; ++j) {
+        cur_seq += safeNumberToDnaChar(Read->Read[j]);
+      }
+      sequences.push_back(cur_seq);
+    }
+
+    assert(sequences.size() != 0);
+
+    results.emplace_back(pool.enqueue([&macrosatellites, &macrosatellites_mutex,
+                                       sequences, anchors, raw_left_boundary,
                                        raw_right_boundary]() mutable {
       auto alignment_engine = spoa::AlignmentEngine::Create(
           spoa::AlignmentType::kNW, 3, -5, -3); // linear gaps
@@ -618,38 +695,8 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
 
       auto consensus = graph.GenerateConsensus();
       int consensus_len = static_cast<int>(consensus.size());
-      uint8_t *cons = alloc_uint8_t(consensus);
-
-      int l0 = std::max(0, raw_left_boundary - consensus_len + 1);
-      int r0 = raw_left_boundary;
-      int len0 = r0 - l0 + 1;
-
-      uint8_t *sequence_middle =
-          const_cast<uint8_t *>(reinterpret_cast<const uint8_t *>(
-              sequences[sequences.size() / 2].c_str()));
-      int sequence_middle_len =
-          static_cast<int>(sequences[sequences.size() / 2].size());
-
-      int move_left_boundary_len = alignment::extend_left_boundary(
-          sequence_middle, sequence_middle_len,
-          reinterpret_cast<uint8_t *>(query) + l0, len0,
-          1. - options.error_rate);
-
-      int l1 = raw_right_boundary;
-      int r1 = std::min(Read->len, raw_right_boundary + consensus_len - 1);
-      int len1 = r1 - l1 + 1;
-
-      int move_right_boundary_len = alignment::extend_right_boundary(
-          sequence_middle, sequence_middle_len,
-          reinterpret_cast<uint8_t *>(query) + l1, len1,
-          1. - options.error_rate);
-
-      raw_left_boundary -= move_left_boundary_len + 1;
-      raw_right_boundary += move_right_boundary_len + 1;
-      anchors.push_back(raw_left_boundary);
-      anchors.push_back(raw_right_boundary);
-      sort(anchors.begin(), anchors.end());
-      anchors.erase(unique(anchors.begin(), anchors.end()), anchors.end());
+      uint8_t *cons =
+          reinterpret_cast<uint8_t *>(const_cast<char *>(consensus.c_str()));
 
       Macrosatellite macrosatellite;
       macrosatellite.left_boundary = raw_left_boundary;
@@ -665,13 +712,23 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
       double total_match = 0.;
       double total_length = 0.;
 
+      bool ok = true;
+      for (int i = 1; i + 1 < sequences.size(); ++i) {
+        int sz = sequences[i].size();
+        int delta = abs(consensus_len - sz);
+        if (delta >= consensus_len * 0.2) {
+          ok = false;
+        }
+      }
+      if (!ok) {
+        return;
+      }
       for (auto &sequence : sequences) {
         const uint8_t *seq =
             reinterpret_cast<const uint8_t *>(sequence.c_str());
         int seq_len = static_cast<int>(sequence.size());
-        auto [match, total] =
-            alignment::alignment(sequence_middle, sequence_middle_len,
-                                 const_cast<uint8_t *>(seq), seq_len);
+        auto [match, total] = alignment::alignment(
+            cons, consensus_len, const_cast<uint8_t *>(seq), seq_len);
         total_match += match;
         total_length += sequence.size();
       }
@@ -690,18 +747,25 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   LOG << "cnt = " << cnt;
   LOG << "macrosatellites.size() = " << macrosatellites.size();
 
-  ofs << "fasta: " << Read->ID << std::endl;
+  std::string name = firstWord(Read->ID);
 
+  sort(macrosatellites.begin(), macrosatellites.end(),
+       [](const Macrosatellite &lhs, const Macrosatellite &rhs) -> bool {
+         return lhs.left_boundary < rhs.left_boundary;
+       });
   for (auto &macrosatellite : macrosatellites) {
-    ofs << "|" << macrosatellite.left_boundary << "_"
-        << macrosatellite.right_boundary << "|"
-        << macrosatellite.approximate_repeat_unit << "_"
-        << macrosatellite.copy_number << "_" << macrosatellite.avg_match_ratio
-        << ' ' << macrosatellite.consensus << std::endl;
+    if (macrosatellite.copy_number <= 5)
+      continue;
+    std::cout << name << ' ' << macrosatellite.left_boundary << ' '
+              << macrosatellite.right_boundary << ' '
+              << macrosatellite.approximate_repeat_unit << ' '
+              << macrosatellite.copy_number << ' '
+              << macrosatellite.avg_match_ratio << ' '
+              << macrosatellite.consensus << ' ';
 
     for (int i = 0; i < macrosatellite.anchors.size(); ++i) {
-      ofs << macrosatellite.anchors[i]
-          << "_\n"[i + 1 == macrosatellite.anchors.size()];
+      std::cout << macrosatellite.anchors[i]
+                << ",\n"[i + 1 == macrosatellite.anchors.size()];
     }
   }
 }

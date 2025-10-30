@@ -56,3 +56,4 @@ template <typename T> void unfilify(T &x, const std::string &fileName) {
 }
 
 int overlap_segment(int l1, int r1, int l2, int r2);
+std::string firstWord(const std::string &s);

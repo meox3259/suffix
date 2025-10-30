@@ -36,16 +36,17 @@ public:
     
     // 单点最大值更新：如果val更大则更新位置idx
     void updateMax(int idx, int val) {
-        if (idx < 1 || idx > n) return;  // 边界检查
-        
-        // 只有当新值更大时才更新
-        if (val > arr[idx]) {
-            int oldVal = arr[idx];
-            arr[idx] = val;
-            
-            // 需要重建受影响的树节点
-            rebuildAffectedNodes(idx);
-        }
+      if (idx < 1 || idx > n)
+        return; // 边界检查
+
+      // 只有当新值更大时才更新
+      if (val > arr[idx]) {
+        int oldVal = arr[idx];
+        arr[idx] = val;
+
+        // 需要重建受影响的树节点
+        rebuildAffectedNodes(idx);
+      }
     }
     
     // 直接设置单点值

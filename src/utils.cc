@@ -96,3 +96,10 @@ bool check_substring(const char* text, const std::string& substring) {
 int overlap_segment(int l1, int r1, int l2, int r2) {
   return std::max(0, std::min(r1, r2) - std::max(l1, l2) + 1);
 }
+
+std::string firstWord(const std::string &s) {
+  std::string word;
+  std::istringstream iss(s);
+  iss >> word;
+  return word; // might be empty
+}
