@@ -5,7 +5,7 @@
 To run the program, use the following command-line syntax:
 
 ```bash
-./your_program_name [options] -i
+./build/bin/suffix [options] -i
 ```
 
 ### Options
@@ -27,17 +27,17 @@ The following table lists all available command-line arguments:
 **Basic usage:**
 Run with default settings, specifying only input and output files:
 ```bash
-./your_tool -i input.data
+./build/bin/suffix  -i data/CT47.fa
 ```
 
 **Advanced usage:**
 Run with a k-mer size of 31, using 8 threads, and a specific error rate:
 ```bash
-./your_tool -i reads.fq result.txt --kmer 31 --error 0.05 --num_threads 8
+./build/bin/suffix  -i data/CT47.fa --kmer 20 --error 0.05 --num_threads 8
 ```
 
 **Verbose mode:**
 Run with verbose logging enabled to debug or monitor progress:
 ```bash
-./your_tool -i input.data -v
+./build/bin/suffix  -i data/CT47.fa -v
 ```
