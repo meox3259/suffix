@@ -19,6 +19,9 @@ struct Options {
   int max_copy_number;
   int expand_window_size;
   int num_threads;
+  int lower_bound;
+  int upper_bound;
+  double kmer_rate;
 
   enum OutputType { maskOut, probOut, countOut, bedOut, repOut } outputType;
 };

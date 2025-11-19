@@ -1,5 +1,11 @@
 ***
 
+## Build
+
+```bash
+rm -rf build && mkdir build && cd build && cmake .. && make && cd ..
+```
+
 ## Usage
 
 To run the program, use the following command-line syntax:

@@ -31,11 +31,11 @@ int intFromText(const char *text) {
 }
 
 Options::Options()
-    : error_rate(0.05), verbose(false), input_filename(nullptr),
-      output_filename(nullptr), kmer_size(30), N_threshold(0.5),
-      min_anchor_size(3), max_anchor_size(20), expand_window_size(10),
-      min_copy_number(5), max_copy_number(1000), num_threads(4),
-      outputType(maskOut) {}
+    : error_rate(0.05), verbose(false), input_filename(nullptr), kmer_size(30),
+      N_threshold(0.5), min_anchor_size(3), max_anchor_size(20),
+      expand_window_size(30), min_copy_number(5), max_copy_number(1000),
+      num_threads(4), outputType(maskOut), lower_bound(1000), upper_bound(5000),
+      kmer_rate(0.05) {}
 
 void Options::fromArgs(int argc, char **argv) {
   std::string help = "currently nothing";
@@ -59,9 +59,6 @@ void Options::fromArgs(int argc, char **argv) {
       break;
     case 'i':
       input_filename = optarg;
-      break;
-    case 'o':
-      output_filename = optarg;
       break;
     case 'k':
       kmer_size = intFromText(optarg);

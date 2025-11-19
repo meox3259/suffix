@@ -27,29 +27,21 @@ int8_t mat[25] = {1,  -2, -2, -2, 0,  -2, 1, -2, -2, 0, -2, -2, 1,
                   -2, 0,  -2, -2, -2, 1,  0, 0,  0,  0, 0,  0};
 
 int prime_number[] = {
-    -100000000, 1009, 1061, 1109, 1163, 1213, 1277, 1327, 1381,    1429,
-    1481,       1531, 1579, 1627, 1693, 1741, 1789, 1847, 1901,    1949,
-    1997,       2053, 2111, 2161, 2213, 2267, 2333, 2381, 2437,    2503,
-    2551,       2609, 2657, 2707, 2767, 2819, 2879, 2927, 2999,    3049,
-    3109,       3163, 3217, 3271, 3319, 3371, 3433, 3491, 3539,    3593,
-    3643,       3691, 3739, 3793, 3847, 3907, 3967, 4000, 4050,    4100,
-    4150,       4200, 4350, 4300, 4350, 4400, 4450, 4500, 4550,    4600,
-    4650,       4700, 4750, 4800, 4850, 4900, 4950, 5000, +1000000};
-
-namespace factor {
-
-const double error_rate = 0.01;
-const double kmer_rate = 0.05; // change
-const double alignment_error_rate = 0.2;
-const int lower_bound = 1000, upper_bound = 5000;
-const int gap_delta_threshold = 50;
-const int min_anchor_size = 3, max_anchor_size = 20;
-const int kmer_size = 30;
-const double N_threshold = 0.5;
-
-bool is_gap_valid(int gap) { return gap >= lower_bound && gap <= upper_bound; }
-
-} // namespace factor
+    -100000000, 1009, 1061, 1109, 1163,    1213, 1277, 1327, 1381, 1429, 1481,
+    1531,       1579, 1627, 1693, 1741,    1789, 1847, 1901, 1949, 1997, 2053,
+    2111,       2161, 2213, 2267, 2333,    2381, 2437, 2503, 2551, 2609, 2657,
+    2707,       2767, 2819, 2879, 2927,    2999, 3049, 3109, 3163, 3217, 3271,
+    3319,       3371, 3433, 3491, 3539,    3593, 3643, 3691, 3739, 3793, 3847,
+    3907,       3967, 4000, 4050, 4100,    4150, 4200, 4350, 4300, 4350, 4400,
+    4450,       4500, 4550, 4600, 4650,    4700, 4750, 4800, 4850, 4900, 4950,
+    5000,       5050, 5100, 5150, 5200,    5250, 5300, 5350, 5400, 5450, 5500,
+    5550,       5600, 5650, 5700, 5750,    5800, 5850, 5900, 5950, 6000, 6050,
+    6100,       6150, 6200, 6250, 6300,    6350, 6400, 6450, 6500, 6550, 6600,
+    6650,       6700, 6750, 6800, 6850,    6900, 6950, 7000, 7050, 7100, 7150,
+    7200,       7250, 7300, 7350, 7400,    7450, 7500, 7550, 7600, 6650, 6700,
+    6750,       6800, 6850, 6900, 6950,    7000, 7050, 7100, 7150, 7200, 7250,
+    7300,       7350, 7400, 7450, 7500,    7550, 7600, 7650, 7700, 7750, 7800,
+    7850,       7900, 7950, 8000, +1000000};
 
 namespace alignment {
 
@@ -93,10 +85,7 @@ std::pair<int, int> alignment(uint8_t *query, int qlen, uint8_t *target,
 
   ksw_extz2_sse(0, qlen, query, tlen, target, 5, mat, gap_open, gap_ext, w,
                 zdrop, end_bonus, flag, &ez);
-  //  for (int i = 0; i < ez.n_cigar; ++i) // print CIGAR
-  //    printf("%d%c", ez.cigar[i] >> 4, "MID"[ez.cigar[i] & 0xf]);
-  //  putchar('\n');
-  fflush(stdout);
+
   std::vector<int> xid = ksw2_get_xid(ez.cigar, ez.n_cigar, query, target);
   return {xid[0], accumulate(xid.begin(), xid.end(), 0)};
 }
@@ -304,8 +293,7 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   for (int i = 0; i < Read->len; ++i) {
     prefix_sum_N[i + 1] = prefix_sum_N[i] + Read->is_N[i];
   }
-  //  std::cerr << "prefix_sum_N = " << prefix_sum_N[Read->len - 1] <<
-  //  std::endl;
+
   LOG << "prefix_sum_N_last = " << prefix_sum_N[Read->len - 1];
   // 构建 suspect region
 
@@ -317,7 +305,7 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   std::vector<std::pair<int, int>> right_index_pair;
   for (int i = 0; i < Read->len - 1; ++i) {
     if (lcp_array[i] < options.kmer_size) {
-      if (right_index.size() <= factor::min_anchor_size) {
+      if (right_index.size() <= options.min_anchor_size) {
         continue;
       }
       int start_position = 0;
@@ -336,7 +324,7 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
     right_index.push_back(suffix_array[i + 1]);
   }
 
-  if (right_index.size() > factor::min_anchor_size) {
+  if (right_index.size() > options.min_anchor_size) {
     int start_position = right_index[0];
     int end_position = right_index.back();
     int N_count = prefix_sum_N[end_position + 1] - prefix_sum_N[start_position];
@@ -367,15 +355,14 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   int start_position = suffix_array[0];
   int end_position = suffix_array[0];
   for (int i = 0; i < Read->len - 1; ++i) {
-    if (lcp_array[i] < factor::kmer_size) {
-      if (right_index.size() <= factor::min_anchor_size) {
+    if (lcp_array[i] < options.kmer_size) {
+      if (right_index.size() <= options.min_anchor_size) {
         continue;
       }
       // 这里非常慢
       assert(start_position <= end_position);
       int N_count = prefix_sum_N[end_position] - prefix_sum_N[start_position];
-      if (N_count >
-          /*factor::N_threshold * (end_position - start_position + 1)*/ 100) {
+      if (N_count > options.N_threshold * (end_position - start_position + 1)) {
         right_index.clear();
         start_position = Read->len - 1;
         end_position = 0;
@@ -383,9 +370,11 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
       }
       const auto &sorted_right_index = right_index_2d[id];
       for (int j = 0; j < sorted_right_index.size(); ++j) {
-        for (int k = 1; k <= 30 && j + k < sorted_right_index.size(); ++k) {
+        for (int k = 1; k <= options.expand_window_size &&
+                        j + k < sorted_right_index.size();
+             ++k) {
           int gap = sorted_right_index[j + k] - sorted_right_index[j];
-          if (gap >= factor::lower_bound && gap <= factor::upper_bound) {
+          if (gap >= options.lower_bound && gap <= options.upper_bound) {
             gap_values.push_back(gap);
             gaps.emplace_back(gap, sorted_right_index[j]);
           }
@@ -401,20 +390,22 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
     end_position = max(end_position, suffix_array[i + 1]);
   }
 
-  if (right_index.size() > factor::min_anchor_size) {
+  if (right_index.size() > options.min_anchor_size) {
     int start_position = *min_element(right_index.begin(), right_index.end());
     int end_position = *max_element(right_index.begin(), right_index.end());
     int N_count = prefix_sum_N[end_position + 1] - prefix_sum_N[start_position];
     if (!(N_count >
-          factor::N_threshold * (end_position - start_position + 1))) {
+          options.N_threshold * (end_position - start_position + 1))) {
       auto sorted_right_index = right_index_2d[id];
       assert(is_sorted(
           sorted_right_index.begin(), sorted_right_index.end(),
           [](const auto &a, const auto &b) -> bool { return a < b; }));
       for (int j = 0; j < sorted_right_index.size(); ++j) {
-        for (int k = 1; k <= 10 && j + k < sorted_right_index.size(); ++k) {
+        for (int k = 1; k <= options.expand_window_size &&
+                        j + k < sorted_right_index.size();
+             ++k) {
           int gap = sorted_right_index[j + k] - sorted_right_index[j];
-          if (gap >= factor::lower_bound && gap <= factor::upper_bound) {
+          if (gap >= options.lower_bound && gap <= options.upper_bound) {
             gap_values.push_back(gap);
             gaps.emplace_back(gap, sorted_right_index[j]);
           }
@@ -446,7 +437,7 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
     int end_position = start_position + gaps[i].first;
     int gap = gaps[i].first;
     int gap_index =
-        std::lower_bound(prime_number, prime_number + 78, gap) - prime_number;
+        std::lower_bound(prime_number, prime_number + 158, gap) - prime_number;
     int dis1 = std::abs(gap - prime_number[gap_index]);
     int dis2 = std::abs(gap - prime_number[gap_index - 1]);
     if (dis1 <= 50) {
@@ -458,9 +449,7 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   }
 
   LOG << "bucket_of_index.size() = " << bucket_of_index.size();
-  //  std::cerr << "bucket_of_index.size() = " << bucket_of_index.size()
-  //            << std::endl;
-  // 校验一下
+
   for (auto &vec : bucket_of_index) {
     assert(std::is_sorted(vec.begin(), vec.end(),
                           [](const auto &a, const auto &b) -> bool {
@@ -469,7 +458,7 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   }
 
   LOG << "gap_values.size() = " << gap_values.size();
-  //  std::cerr << "gap_values.size() = " << gap_values.size() << std::endl;
+
   std::vector<std::tuple<int, int, int>> raw_estimate_unit_region;
 
   // 排好序后，计算原始的
@@ -486,7 +475,7 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
         k++;
         num_of_index++;
       }
-      if (num_of_index >= gap * factor::kmer_rate) {
+      if (num_of_index >= gap * options.kmer_rate) {
         raw_estimate_unit_region.emplace_back(start_position, gap, i);
       }
     }
