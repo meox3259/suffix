@@ -31,11 +31,12 @@ int intFromText(const char *text) {
 }
 
 Options::Options()
-    : error_rate(0.05), verbose(false), input_filename(nullptr),
-      output_filename(nullptr), kmer_size(30), N_threshold(0.5),
-      min_anchor_size(3), max_anchor_size(20), expand_window_size(10),
+    : error_rate(0.1), verbose(false), input_filename(nullptr),
+      output_filename(nullptr), kmer_size(20), N_threshold(0.5),
+      min_anchor_size(3), max_anchor_size(20), expand_window_size(30),
       min_copy_number(5), max_copy_number(1000), num_threads(4),
-      outputType(maskOut) {}
+      outputType(maskOut), repeat_unit_error_rate(0.02),
+      extend_error_rate(0.25), repeat_unit_length_rate(0.1) {}
 
 void Options::fromArgs(int argc, char **argv) {
   std::string help = "currently nothing";

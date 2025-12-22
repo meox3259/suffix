@@ -44,7 +44,7 @@ const double alignment_error_rate = 0.2;
 const int lower_bound = 1000, upper_bound = 5000;
 const int gap_delta_threshold = 50;
 const int min_anchor_size = 3, max_anchor_size = 20;
-const int kmer_size = 30;
+const int kmer_size = 20;
 const double N_threshold = 0.5;
 
 bool is_gap_valid(int gap) { return gap >= lower_bound && gap <= upper_bound; }
@@ -315,81 +315,25 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   // 目前改进的方法为，每个k-mer匹配向后5个的所有k-mer，作为gap
   int id = 0;
   std::vector<std::pair<int, int>> right_index_pair;
-  for (int i = 0; i < Read->len - 1; ++i) {
-    if (lcp_array[i] < options.kmer_size) {
-      if (right_index.size() <= factor::min_anchor_size) {
-        continue;
-      }
-      int start_position = 0;
-      int end_position = 0;
-      int N_count = prefix_sum_N[end_position] - prefix_sum_N[start_position];
-      if (N_count >
-          /*factor::N_threshold * (end_position - start_position + 1)*/ 100) {
-        continue;
-      }
-      for (int j : right_index) {
-        right_index_pair.emplace_back(j, id);
-      }
-      id++;
-      right_index.clear();
-    }
-    right_index.push_back(suffix_array[i + 1]);
-  }
-
-  if (right_index.size() > factor::min_anchor_size) {
-    int start_position = right_index[0];
-    int end_position = right_index.back();
-    int N_count = prefix_sum_N[end_position + 1] - prefix_sum_N[start_position];
-    if (!(N_count >
-          options.N_threshold * (end_position - start_position + 1))) {
-      for (int j : right_index) {
-        right_index_pair.emplace_back(j, id);
-      }
-      id++;
-    }
-  }
-
-  LOG << "first id = " << id;
-  radix_sort(
-      right_index_pair, [](const auto &item) -> int { return item.first; },
-      Read->len);
-  LOG << "out of radix sort";
-
-  std::vector<std::vector<int>> right_index_2d(id);
-  for (const auto &[index, id] : right_index_pair) {
-    right_index_2d[id].push_back(index);
-  }
-
-  LOG << "right_index_2d.size() = " << right_index_2d.size();
-
-  right_index = {suffix_array[0]};
-  id = 0;
   int start_position = suffix_array[0];
   int end_position = suffix_array[0];
   for (int i = 0; i < Read->len - 1; ++i) {
-    if (lcp_array[i] < factor::kmer_size) {
+    if (lcp_array[i] < options.kmer_size) {
       if (right_index.size() <= factor::min_anchor_size) {
-        continue;
-      }
-      // 这里非常慢
-      assert(start_position <= end_position);
-      int N_count = prefix_sum_N[end_position] - prefix_sum_N[start_position];
-      if (N_count >
-          /*factor::N_threshold * (end_position - start_position + 1)*/ 100) {
         right_index.clear();
         start_position = Read->len - 1;
         end_position = 0;
         continue;
       }
-      const auto &sorted_right_index = right_index_2d[id];
-      for (int j = 0; j < sorted_right_index.size(); ++j) {
-        for (int k = 1; k <= 30 && j + k < sorted_right_index.size(); ++k) {
-          int gap = sorted_right_index[j + k] - sorted_right_index[j];
-          if (gap >= factor::lower_bound && gap <= factor::upper_bound) {
-            gap_values.push_back(gap);
-            gaps.emplace_back(gap, sorted_right_index[j]);
-          }
-        }
+      int N_count = prefix_sum_N[end_position] - prefix_sum_N[start_position];
+      if (N_count > options.N_threshold * (end_position - start_position + 1)) {
+        right_index.clear();
+        start_position = Read->len - 1;
+        end_position = 0;
+        continue;
+      }
+      for (int j : right_index) {
+        right_index_pair.emplace_back(j, id);
       }
       id++;
       right_index.clear();
@@ -406,21 +350,111 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
     int end_position = *max_element(right_index.begin(), right_index.end());
     int N_count = prefix_sum_N[end_position + 1] - prefix_sum_N[start_position];
     if (!(N_count >
-          factor::N_threshold * (end_position - start_position + 1))) {
-      auto sorted_right_index = right_index_2d[id];
-      assert(is_sorted(
-          sorted_right_index.begin(), sorted_right_index.end(),
-          [](const auto &a, const auto &b) -> bool { return a < b; }));
+          options.N_threshold * (end_position - start_position + 1))) {
+      for (int j : right_index) {
+        right_index_pair.emplace_back(j, id);
+      }
+      id++;
+    }
+  }
+
+  LOG << "first id = " << id;
+  radix_sort(
+      right_index_pair, [](const auto &item) -> int { return item.first; },
+      Read->len);
+  LOG << "out of radix sort";
+
+  std::vector<std::vector<int>> right_index_2d(id + 1);
+  for (const auto &[index, id] : right_index_pair) {
+    right_index_2d[id].push_back(index);
+  }
+
+  LOG << "right_index_2d.size() = " << right_index_2d.size();
+
+  right_index = {suffix_array[0]};
+  id = 0;
+  start_position = suffix_array[0];
+  end_position = suffix_array[0];
+  for (int i = 0; i < Read->len - 1; ++i) {
+    if (lcp_array[i] < options.kmer_size) {
+      if (right_index.size() <= factor::min_anchor_size) {
+        right_index.clear();
+        start_position = Read->len - 1;
+        end_position = 0;
+        continue;
+      }
+      // 这里非常慢
+      assert(start_position <= end_position);
+      const auto &sorted_right_index = right_index_2d[id];
+      sort(right_index.begin(), right_index.end());
+      for (int j = 0; j < right_index.size(); ++j) {
+        for (int k = 1; k <= 40 && j + k < right_index.size(); ++k) {
+          int gap = right_index[j + k] - right_index[j];
+          int N_count =
+              prefix_sum_N[right_index[j + k]] - prefix_sum_N[right_index[j]];
+          if (N_count >
+              options.N_threshold * (right_index[j + k] - right_index[j] + 1)) {
+            continue;
+          }
+          if (gap >= factor::lower_bound && gap <= factor::upper_bound) {
+            gap_values.push_back(gap);
+            gaps.emplace_back(gap, right_index[j]);
+          }
+        }
+      } /*
       for (int j = 0; j < sorted_right_index.size(); ++j) {
-        for (int k = 1; k <= 10 && j + k < sorted_right_index.size(); ++k) {
+        for (int k = 1; k <= 40 && j + k < sorted_right_index.size(); ++k) {
           int gap = sorted_right_index[j + k] - sorted_right_index[j];
           if (gap >= factor::lower_bound && gap <= factor::upper_bound) {
             gap_values.push_back(gap);
             gaps.emplace_back(gap, sorted_right_index[j]);
           }
         }
-      }
+      } */
+      id++;
+      right_index.clear();
+      start_position = Read->len - 1;
+      end_position = 0;
     }
+    right_index.push_back(suffix_array[i + 1]);
+    start_position = min(start_position, suffix_array[i + 1]);
+    end_position = max(end_position, suffix_array[i + 1]);
+  }
+
+  LOG << "final id = " << id;
+
+  if (right_index.size() > factor::min_anchor_size) {
+    //  auto sorted_right_index = right_index_2d[id];
+    //  assert(
+    //      is_sorted(sorted_right_index.begin(), sorted_right_index.end(),
+    //                [](const auto &a, const auto &b) -> bool { return a < b;
+    //                }));
+    sort(right_index.begin(), right_index.end());
+    for (int j = 0; j < right_index.size(); ++j) {
+      for (int k = 1; k <= 40 && j + k < right_index.size(); ++k) {
+        int gap = right_index[j + k] - right_index[j];
+        int N_count =
+            prefix_sum_N[right_index[j + k]] - prefix_sum_N[right_index[j]];
+        if (N_count >
+            options.N_threshold * (right_index[j + k] - right_index[j] + 1)) {
+          continue;
+        }
+        if (gap >= factor::lower_bound && gap <= factor::upper_bound) {
+          gap_values.push_back(gap);
+          gaps.emplace_back(gap, right_index[j]);
+        }
+      }
+    } /*
+      for (int j = 0; j < sorted_right_index.size(); ++j) {
+        for (int k = 1; k <= 40 && j + k < sorted_right_index.size(); ++k) {
+          int gap = sorted_right_index[j + k] - sorted_right_index[j];
+          if (gap >= factor::lower_bound && gap <= factor::upper_bound) {
+            gap_values.push_back(gap);
+            gaps.emplace_back(gap, sorted_right_index[j]);
+          }
+        }
+      } */
+    id++;
   }
 
   LOG << "gaps.size() = " << gaps.size();
@@ -437,7 +471,9 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   gap_values.erase(std::unique(gap_values.begin(), gap_values.end()),
                    gap_values.end());
 
-  std::vector<std::vector<pair<int, int>>> bucket_of_index(gap_values.size());
+  std::vector<std::vector<pair<int, int>>> bucket_of_index(78);
+
+  LOG << "gap_values.size() = " << gap_values.size();
 
   // 对gaps处理一下，挑出一些质数，然后处理
   // 这里对gap排序了，所以之后bucket_of_index内部不要排序
@@ -486,6 +522,10 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
         k++;
         num_of_index++;
       }
+      if (start_position > 133600000) {
+        LOG << "start_position = " << start_position << ", gap = " << gap
+            << " num_of_index = " << num_of_index;
+      }
       if (num_of_index >= gap * factor::kmer_rate) {
         raw_estimate_unit_region.emplace_back(start_position, gap, i);
       }
@@ -529,6 +569,10 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
   std::mutex macrosatellites_mutex;
   for (const auto &[start_position, unit_size, index] :
        raw_estimate_unit_region) {
+    if (start_position > 133600000) {
+      LOG << "start_position = " << start_position
+          << ", unit_size = " << unit_size;
+    }
     int end_position = start_position + unit_size;
     if (already_covered(start_position + 1, end_position, unit_size)) {
       continue;
@@ -537,17 +581,33 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
     s = start_position;
     e = end_position;
 
+    auto check_valid = [&](int new_len, vector<int> &anchors) {
+      sort(anchors.begin(), anchors.end());
+      anchors.erase(unique(anchors.begin(), anchors.end()), anchors.end());
+      for (int i = 1; i < anchors.size(); ++i) {
+        int len = anchors[i] - anchors[i - 1] + 1;
+        if (abs(len - new_len) > min(len, new_len) * 0.05) {
+          LOG << "len = " << len << ", new_len = " << new_len;
+          return false;
+        }
+      }
+      return true;
+    };
+
     std::vector<int> anchors{start_position, end_position};
     while (e < Read->len) {
-      int qlen = e - s + 1;
-      int tlen = (e - s + 1) * (1 + options.error_rate * 2);
-      int delta = options.error_rate * (e - s + 1) * 2;
+      int qlen = unit_size;
+      if (Read->len - e < qlen * 0.8) {
+        break;
+      }
+      int tlen = unit_size * (1 + options.repeat_unit_error_rate);
+      int delta = unit_size * options.repeat_unit_error_rate;
       int s1, e1;
       int l, r, l0, r0;
 
       l = s;
       r = e;
-      l0 = std::max(0, e - delta);
+      l0 = e;
       r0 = e + (e - s + 1) + delta;
       qlen = r - l + 1;
       tlen = r0 - l0 + 1;
@@ -559,9 +619,22 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
 
       int ed = edlib_align_HW(query + l, qlen, query + l0, tlen, &s1, &e1,
                               std::min(qlen, tlen));
-      if (ed > min(qlen, tlen) * options.error_rate * 2) {
+      if (ed > min(qlen, tlen) * options.extend_error_rate) {
+        LOG << "ed = " << ed;
         break;
       }
+
+      int new_len = e1 - s1 + 1;
+      //  if (!check_valid(new_len, anchors)) {
+      //    LOG << "111";
+      //    break;
+      //  }
+      if (abs(new_len - unit_size) > unit_size * 0.05) {
+        LOG << "111" << " " << "new_len = " << new_len << " "
+            << "unit_size = " << unit_size << " ed = " << ed;
+        break;
+      }
+
       anchors.push_back(e);
       s = l0 + s1;
       e = l0 + e1;
@@ -573,14 +646,17 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
     e = end_position;
 
     while (s >= 0) {
-      int qlen = e - s + 1;
-      int tlen = (e - s + 1) * (1 + options.error_rate * 2);
-      int delta = (e - s + 1) * options.error_rate;
+      int qlen = unit_size;
+      if (s < qlen * 0.8) {
+        break;
+      }
+      int tlen = unit_size * (1 + options.repeat_unit_error_rate);
+      int delta = unit_size * options.repeat_unit_error_rate;
       int s1, e1;
       int l, r, l0, r0;
       l = s;
       r = e;
-      l0 = std::max(0, s - delta - qlen);
+      l0 = std::max(0, s - delta - tlen);
       r0 = l0 + tlen;
       qlen = r - l + 1;
       tlen = r0 - l0 + 1;
@@ -592,7 +668,19 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
 
       int ed = edlib_align_HW(query + l, qlen, query + l0, tlen, &s1, &e1,
                               std::min(qlen, tlen));
-      if (ed > min(qlen, tlen) * options.error_rate * 2) {
+      if (ed > min(qlen, tlen) * options.extend_error_rate) {
+        LOG << "ed = " << ed;
+        break;
+      }
+
+      int new_len = e1 - s1 + 1;
+      //  if (!check_valid(new_len, anchors)) {
+      //    LOG << "111";
+      //    break;
+      //  }
+      if (abs(new_len - unit_size) > unit_size * 0.05) {
+        LOG << "111" << " " << "new_len = " << new_len << " "
+            << "unit_size = " << unit_size << " ed = " << ed;
         break;
       }
 
@@ -618,7 +706,9 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
     left_extend_end = std::max(0, anchors[0] - delta);
     right_extend_end = std::min(Read->len, anchors.back() + delta);
 
-    if (anchors.size() < 5) {
+    LOG << "anchors.size() = " << anchors.size() << " unit_size = " << unit_size
+        << " start_position = " << start_position;
+    if (anchors.size() <= 5) {
       ft.updateMax(left_extend_end + 1, right_extend_end);
       continue;
     }
@@ -721,18 +811,22 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
         }
       }
       if (!ok) {
+        LOG << "out of range";
         return;
       }
+      int cnt = 0;
+      double avg_match_ratio = 0;
       for (auto &sequence : sequences) {
         const uint8_t *seq =
             reinterpret_cast<const uint8_t *>(sequence.c_str());
         int seq_len = static_cast<int>(sequence.size());
         auto [match, total] = alignment::alignment(
             cons, consensus_len, const_cast<uint8_t *>(seq), seq_len);
-        total_match += match;
-        total_length += sequence.size();
+        cnt++;
+        avg_match_ratio +=
+            static_cast<double>(match) / static_cast<double>(sequence.size());
       }
-      macrosatellite.avg_match_ratio = total_match / total_length;
+      macrosatellite.avg_match_ratio = avg_match_ratio / cnt;
       {
         std::lock_guard<std::mutex> lock(macrosatellites_mutex);
         macrosatellites.emplace_back(macrosatellite);
