@@ -847,8 +847,26 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
        [](const Macrosatellite &lhs, const Macrosatellite &rhs) -> bool {
          return lhs.left_boundary < rhs.left_boundary;
        });
-  for (auto &macrosatellite : macrosatellites) {
+
+  std::vector<bool> mark(macrosatellites.size(), false);
+  for (int i = 0; i < macrosatellites.size(); ++i) {
+    for (int j = 0; j < macrosatellites.size(); ++j) {
+      if (i == j)
+        continue;
+      if (macrosatellites[i].left_boundary >=
+              macrosatellites[j].left_boundary &&
+          macrosatellites[i].right_boundary <=
+              macrosatellites[j].right_boundary) {
+        mark[i] = true;
+        break;
+      }
+    }
+  }
+  for (int i = 0; i < macrosatellites.size(); ++i) {
+    auto macrosatellite = macrosatellites[i];
     if (macrosatellite.copy_number <= 5)
+      continue;
+    if (mark[i])
       continue;
     std::cout << name << ' ' << macrosatellite.left_boundary << ' '
               << macrosatellite.right_boundary << ' '
