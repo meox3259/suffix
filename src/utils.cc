@@ -9,7 +9,7 @@
 
 #define overlap_threshold 0.5
 
-enum class GENE { A, C, G, T };
+enum class GENE { A, G, T, C };
 
 const char *seeds[] = {
     "RRRRRRRYYRYY", "RRYRRYYYYYYY", "RRRRRRYYYRYY", "RRYRRRYYYYYY",
@@ -42,7 +42,7 @@ bool filter_by_seed(const std::string &s, int pos) {
 
 char safeNumberToDnaChar(int num, char default_char) {
   if (num >= 0 && num <= 3) {
-    static const char mapping[] = {'A', 'C', 'G', 'T'};
+    static const char mapping[] = {'A', 'G', 'T', 'C'};
     return mapping[num];
   }
   return default_char;

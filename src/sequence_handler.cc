@@ -619,6 +619,7 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
 
       int ed = edlib_align_HW(query + l, qlen, query + l0, tlen, &s1, &e1,
                               std::min(qlen, tlen));
+      LOG << "ed = " << ed;
       if (ed > min(qlen, tlen) * options.extend_error_rate) {
         LOG << "ed = " << ed;
         break;
@@ -668,6 +669,9 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
 
       int ed = edlib_align_HW(query + l, qlen, query + l0, tlen, &s1, &e1,
                               std::min(qlen, tlen));
+      LOG << "ed = " << ed
+          << " tolr = " << min(qlen, tlen) * options.extend_error_rate
+          << "tlen = " << tlen << " qlen = " << qlen;
       if (ed > min(qlen, tlen) * options.extend_error_rate) {
         LOG << "ed = " << ed;
         break;
@@ -748,6 +752,8 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
         reinterpret_cast<uint8_t *>(query) + l1, len1,
         1. - options.error_rate * 2);
 
+    LOG << "move_left_boundary_len = " << move_left_boundary_len
+        << " move_right_boundary_len = " << move_right_boundary_len;
     raw_left_boundary -= move_left_boundary_len + 1;
     raw_right_boundary += move_right_boundary_len + 1;
     anchors.push_back(raw_left_boundary);
@@ -821,10 +827,12 @@ void solve(std::ofstream &ofs, Read *Read, const Options &options) {
             reinterpret_cast<const uint8_t *>(sequence.c_str());
         int seq_len = static_cast<int>(sequence.size());
         auto [match, total] = alignment::alignment(
-            cons, consensus_len, const_cast<uint8_t *>(seq), seq_len);
+            const_cast<uint8_t *>(seq), seq_len, cons, consensus_len);
         cnt++;
         avg_match_ratio +=
             static_cast<double>(match) / static_cast<double>(sequence.size());
+        LOG << "match = " << match << " sizes = " << sequence.size()
+            << " total = " << total;
       }
       macrosatellite.avg_match_ratio = avg_match_ratio / cnt;
       {
